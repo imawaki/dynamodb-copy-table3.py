@@ -3,9 +3,9 @@ import boto3 as boto3
 import sys
 import os
 
-if len(sys.argv) != 3:
+if len(sys.argv) != 4:
     print('Usage: %s <source_table_name>' \
-        ' <destination_table_name>' % sys.argv[0])
+        ' <destination_table_name> <target_function_name>' % sys.argv[0])
     sys.exit(1)
 
 region = os.getenv('AWS_DEFAULT_REGION', 'ap-northeast-1')
@@ -55,14 +55,16 @@ except e:
     print(e)
     sys.exit(1)
 
+target_function = sys.argv[3]
+print('target_function: %s' % target_function)
 
 with dst_table.batch_writer() as batch:
     print('Copying items...')
     for item in src_table.scan()['Items']:
         if (('virtual_driver_command_key' in item \
-            and not item['virtual_driver_command_key'].startswith('aws.lambda.devIoTEx')) \
+            and not item['virtual_driver_command_key'].startswith('aws.lambda.' + target_function)) \
         or ('driver_edge_thing_key' in item \
-            and not item['driver_edge_thing_key'].startswith('aws.lambda.devIoTEx'))):
+            and not item['driver_edge_thing_key'].startswith('aws.lambda.' + target_function))):
             continue
         for k, v in item.items():
             if type(v) == str and 'dev' in v:
