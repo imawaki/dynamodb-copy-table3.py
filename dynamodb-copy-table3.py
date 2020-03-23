@@ -23,7 +23,7 @@ try:
     src_table = dynamodb.Table(src_table)
     print('source table: %s' % src_table.table_arn)
 except:
-    print("src_table doesn't exit")
+    print("src_table doesn't exist")
     sys.exit(1)
 
 
@@ -31,7 +31,7 @@ dst_table = sys.argv[2]
 try:
     _ = dynamodb.Table(dst_table)
     if _.table_arn is not None:
-        print('dst_table already exits.')
+        print('dst_table already exists.')
         print(_.table_arn)
         sys.exit(1)
 except:
@@ -58,23 +58,25 @@ except Exception as e:
 target_function = sys.argv[3]
 
 
+print('target_function: %s' % target_function)
+
+# dst_table = dynamodb.Table(dst_table)
+
 target_function = 'aws.lambda.' + target_function
 with dst_table.batch_writer() as batch:
     print('Copying items...')
     for item in src_table.scan()['Items']:
-        if (('virtual_driver_command_key' in item and (not item['virtual_driver_command_key'].startswith(target_function))) \
-              or ('driver_edge_thing_key' in item and (not item['driver_edge_thing_key'].startswith(target_function))) \
-                          or ('driver_id' in item and (not item['driver_id'].startswith(target_function)))):
-            continue
+        if (('virtual_driver_command_key' in item and item['virtual_driver_command_key'].startswith(target_function)) \
+              or ('driver_edge_thing_key' in item and item['driver_edge_thing_key'].startswith(target_function)) \
+                          or ('driver_id' in item and item['driver_id'].startswith(target_function))):
+            for k, v in item.items():
+                if type(v) == str and 'dev' in v:
+                    item[k] = v.replace('dev', 'trail')
 
-        for k, v in item.items():
-            if type(v) == str and 'dev' in v:
-                item[k] = v.replace('dev', 'trail')
+            print(item, end='\n')
+            print('', end='\n')
 
-        print(item, end='\n')
-        print('', end='\n')
-
-        batch.put_item(Item=item)
+            batch.put_item(Item=item)
 
     print('finished')
 
