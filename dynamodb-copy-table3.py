@@ -51,26 +51,31 @@ try:  # Create new table
         )
     dst_table.wait_until_exists()
     print('Created dst_table')
-except e:
+except Exception as e:
     print(e)
     sys.exit(1)
 
 target_function = sys.argv[3]
-print('target_function: %s' % target_function)
 
+
+target_function = 'aws.lambda.' + target_function
 with dst_table.batch_writer() as batch:
     print('Copying items...')
     for item in src_table.scan()['Items']:
-        if (('virtual_driver_command_key' in item \
-            and not item['virtual_driver_command_key'].startswith('aws.lambda.' + target_function)) \
-        or ('driver_edge_thing_key' in item \
-            and not item['driver_edge_thing_key'].startswith('aws.lambda.' + target_function))):
+        if (('virtual_driver_command_key' in item and (not item['virtual_driver_command_key'].startswith(target_function))) \
+              or ('driver_edge_thing_key' in item and (not item['driver_edge_thing_key'].startswith(target_function))) \
+                          or ('driver_id' in item and (not item['driver_id'].startswith(target_function)))):
             continue
+
         for k, v in item.items():
             if type(v) == str and 'dev' in v:
                 item[k] = v.replace('dev', 'trail')
 
+        print(item, end='\n')
+        print('', end='\n')
+
         batch.put_item(Item=item)
+
     print('finished')
 
 
