@@ -7,12 +7,13 @@ import os  # }}}
 
 parser = argparse.ArgumentParser(description='Copies dynamodb')  # {{{
 
-parser.add_argument('--src', help='Table name of dynamodb to be cpied from', required=True)
-parser.add_argument('--dst', help='Table name of destination', required=True)
+parser.add_argument('--src', help='Table name of dynamodb to be cpied from')
+parser.add_argument('--dst', help='Table name of destination')
 parser.add_argument('-f', '--function_name', help='Name of lambda function to copy. Ex. devIoTExDriverAlexaFunctions')
 parser.add_argument('-d', '--dry-run', action='store_true')
 parser.add_argument('--dev_to_trial', action='store_true')
 parser.add_argument('--trial_to_prod', action='store_true')
+parser.add_argument('--show_diff', action='store_true')
 
 args = parser.parse_args()  # }}}
 
@@ -42,10 +43,20 @@ def main():  # {{{
         print('destination table: %s' % dst_table.table_arn)
     else:
         print("destination table doesn't exist")
-        create_destination_table(src_table, args.dst)  # }}}
+        # create_destination_table(src_table, args.dst)  # }}}
 
     if args.function_name:
-        copy_function_items()
+        if args.trial_to_prod:  # {{{
+            _from = 'trial'
+            _to = 'prod'  # }}}
+        if args.dev_to_trial:  # {{{
+            _from = 'dev'
+            _to = 'trial'  # }}}
+        if args.function_name and 'IoTExDriver' in arg.function_name and arg.function_name.endswith('Functions'):  # {{{
+            target = 'aws.lambda.' + args.function_name
+        else:
+            target = 'None'  # }}}
+        migrate_function_records(_from, _to, target)
 
     print ('We are done. Exiting...')  # }}}
 
@@ -78,27 +89,15 @@ def create_destination_table(src_table: dynamodb.Table, dst_table_name: str):  #
         sys.exit(1)  # }}}
 
 
-def copy_function_items():  # {{{
-
-    if args.dev_to_trial:  # {{{
-        _from = 'dev'
-        _to = 'trial'  # }}}
-    if args.trial_to_prod:  # {{{
-        _from = 'trial'
-        _to = 'prod'  # }}}
-
-    if args.function_name:  # {{{
-        target_function = 'aws.lambda.' + args.function_name
-    else:
-        target_function = 'None'  # }}}
+def migrate_function_records(_from :str, _to :str, target :str):  # {{{
 
     with dst_table.batch_writer() as batch:  # {{{
         print('Copying items...')
-        print('target_function: %s' % target_function)
+        print('target_function: %s' % target)
         for item in src_table.scan()['Items']:
-            if ((item.get('virtual_driver_command_key', '').startswith(target_function)) \
-                  or (item.get('driver_edge_thing_key', '').startswith(target_function)) \
-                              or (item.get('driver_id', '').startswith(target_function))):
+            if ((item.get('virtual_driver_command_key', '').startswith(target)) \
+                  or (item.get('driver_edge_thing_key', '').startswith(target)) \
+                              or (item.get('driver_id', '').startswith(target))):
                 for k, v in item.items():
                     if type(v) == str and _from in v:
                         item[k] = v.replace(_from ,_to)
