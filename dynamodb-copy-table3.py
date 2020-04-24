@@ -41,26 +41,33 @@ def main():  # {{{
         sys.exit(1)  # }}}
 
     if table_exists(dst_table):  # {{{
-        print('destination table: %s' % dst_table.table_arn)
+        print('destination table: %s' % dst_table.table_arn, end='\n')
     else:
-        print("destination table doesn't exist")
+        print("destination table doesn't exist", end='\n')
         # create_destination_table(src_table, args.dst)  # }}}
 
+    print('', end='\n')
+
+    if args.trial_to_prod:  # {{{
+        _from = 'trial'
+        _to = 'prod'  # }}}
+    if args.dev_to_trial:  # {{{
+        _from = 'dev'
+        _to = 'trial'  # }}}
+
     if args.function_name:
-        if args.trial_to_prod:  # {{{
-            _from = 'trial'
-            _to = 'prod'  # }}}
-        if args.dev_to_trial:  # {{{
-            _from = 'dev'
-            _to = 'trial'  # }}}
-        if args.function_name and 'IoTExDriver' in args.function_name and args.function_name.endswith('Functions'):  # {{{
-            target = 'aws.lambda.' + args.function_name
+        target = args.function_name
+        if 'IoTExDriver' in target and target.endswith('Functions'):  # {{{
+            if not args.function_name.startswith('aws.lambda.'):
+                target = 'aws.lambda.' + args.function_name
         else:
             target = 'None'  # }}}
-        if args.copy:
-            migrate_function_records(_from, _to, target)
-        if args.show_diff:
-            show_diff(_from, _to, target)
+
+    if args.copy:
+        migrate_function_records(_from, _to, target)
+
+    if args.show_diff:
+        show_diff(_from, _to, target)
 
     print ('We are done. Exiting...')  # }}}
 
@@ -118,37 +125,59 @@ def migrate_function_records(_from :str, _to :str, target :str):  # {{{
 def show_diff(_from :str, _to :str, target :str):  # {{{
 
     print('Showing diff between %s and %s' % (target, _to))
-    for item in src_table.scan()['Items']:
-        if item.get('virtual_driver_command_key', '').startswith(target):
-            compare = dst_table.get_item(Key={'virtual_driver_command_key': item['virtual_driver_command_key'].replace(_from, _to)})
-            pass  # TODO 
-            print('#TODO')
+    print('', end='\n')
 
-        if item.get('driver_thing_attr_key', '').startswith(target):
-            l1 = [ i['command_code'] for i in item['available_command'] ]
+    for item in src_table.scan()['Items']:  # {{{
+        if item.get('virtual_driver_command_key', '').startswith(target):
+            # k = {'driver_thing_attr_key': item['driver_thing_attr_key'].replace(_from, _to), "service_id":item['service_id']}
+            # compare = dst_table.get_item(Key=k)
+            pass  # TODO 
+            print('#TODO')  # }}}
+
+        if item.get('driver_thing_attr_key', '').startswith(target):  # {{{
+            try:
+                # print(type(item['available_command']))
+                l1 = [ i['command_code'] for i in item['available_command'] ]
+            except Exception as e:
+                print(item)
+                print(str(e))
             if '$virtual_set_cache_value' in l1:
                 l1.remove('$virtual_set_cache_value')
 
-            k = {'driver_thing_attr_key': item['driver_thing_attr_key'].replace(_from, _to), "service_id": "iot-service"}
+            k = {'driver_thing_attr_key': item['driver_thing_attr_key'].replace(_from, _to), "service_id":item['service_id']}
             compare = dst_table.get_item(Key=k)
             l2 = []
             if 'Item' in compare:
                 l2 = [ i['command_code'] for i in compare['Item']['available_command'] ]
-
-            if set(l1) - set(l2):
-                print('%s differ' % item['driver_thing_attr_key'])
-                print(item)
+                if '$virtual_set_cache_value' in l2:
+                    l2.remove('$virtual_set_cache_value')
+            else:
+                print('compare not found in %s' % _to)
+                print('Key = %s' % k, end='\n')
+                print(item,end='\n')
                 print('', end='\n')
+                continue
 
-        if item.get('driver_edge_thing_key', '').startswith(target):
+            if set(l1) == set(l2):
+                print('%s same' % item['driver_thing_attr_key'])
+                print('Key = %s' % k, end='\n')
+                print('', end='\n')
+            else:
+                print('%s differ' % item['driver_thing_attr_key'])
+                print('Key = %s' % k, end='\n')
+                print(item)
+                print(compare['Item'])
+                print('', end='\n')  # }}}
+
+        if item.get('driver_edge_thing_key', '').startswith(target):  # {{{
             compare = dst_table.get_item(Key={'driver_edge_thing_key': item['driver_edge_thing_key'].replace(_from, _to)})
-            print('#TODO')
+            print('#TODO')  # }}}
 
-        if item.get('driver_id', '').startswith(target):
+        if item.get('driver_id', '').startswith(target):  # {{{
             compare = dst_table.get_item(Key={'driver_id': item['driver_id'].replace(_from, _to)})
             print('#TODO')
             print(item)
-            print(compare)
+            print(compare)  # }}}
 
     print('finished')  # }}}
 
