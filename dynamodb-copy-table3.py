@@ -144,7 +144,10 @@ def show_diff(_from :str, _to :str, target :str):  # {{{
             if '$virtual_set_cache_value' in l1:
                 l1.remove('$virtual_set_cache_value')
 
-            k = {'driver_thing_attr_key': item['driver_thing_attr_key'].replace(_from, _to), "service_id":item['service_id']}
+            if _from and _to:
+                k = {'driver_thing_attr_key': item['driver_thing_attr_key'].replace(_from, _to), "service_id":item['service_id']}
+            else:
+                k = {'driver_thing_attr_key': item['driver_thing_attr_key'], "service_id":item['service_id']}
             compare = dst_table.get_item(Key=k)
             l2 = []
             if 'Item' in compare:
