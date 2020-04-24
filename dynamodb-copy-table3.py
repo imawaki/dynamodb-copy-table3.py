@@ -13,6 +13,7 @@ parser.add_argument('-f', '--function_name', help='Name of lambda function to co
 parser.add_argument('-d', '--dry-run', action='store_true')
 parser.add_argument('--dev_to_trial', action='store_true')
 parser.add_argument('--trial_to_prod', action='store_true')
+parser.add_argument('--copy', action='store_true')
 parser.add_argument('--show_diff', action='store_true')
 
 args = parser.parse_args()  # }}}
@@ -52,16 +53,19 @@ def main():  # {{{
         if args.dev_to_trial:  # {{{
             _from = 'dev'
             _to = 'trial'  # }}}
-        if args.function_name and 'IoTExDriver' in arg.function_name and arg.function_name.endswith('Functions'):  # {{{
+        if args.function_name and 'IoTExDriver' in args.function_name and args.function_name.endswith('Functions'):  # {{{
             target = 'aws.lambda.' + args.function_name
         else:
             target = 'None'  # }}}
-        migrate_function_records(_from, _to, target)
+        if args.copy:
+            migrate_function_records(_from, _to, target)
+        if args.show_diff:
+            show_diff(_from, _to, target)
 
     print ('We are done. Exiting...')  # }}}
 
 
-def table_exists(table):  # {{{
+def table_exists(table :dynamodb.Table) -> bool:  # {{{
     result = False
     try:
         result = table.table_status in ("CREATING", "UPDATING", "DELETING", "ACTIVE")
@@ -109,6 +113,44 @@ def migrate_function_records(_from :str, _to :str, target :str):  # {{{
 
         print('finished')  # }}}
     # }}}
+
+
+def show_diff(_from :str, _to :str, target :str):  # {{{
+
+    print('Showing diff between %s and %s' % (target, _to))
+    for item in src_table.scan()['Items']:
+        if item.get('virtual_driver_command_key', '').startswith(target):
+            compare = dst_table.get_item(Key={'virtual_driver_command_key': item['virtual_driver_command_key'].replace(_from, _to)})
+            pass  # TODO 
+            print('#TODO')
+
+        if item.get('driver_thing_attr_key', '').startswith(target):
+            l1 = [ i['command_code'] for i in item['available_command'] ]
+            if '$virtual_set_cache_value' in l1:
+                l1.remove('$virtual_set_cache_value')
+
+            k = {'driver_thing_attr_key': item['driver_thing_attr_key'].replace(_from, _to), "service_id": "iot-service"}
+            compare = dst_table.get_item(Key=k)
+            l2 = []
+            if 'Item' in compare:
+                l2 = [ i['command_code'] for i in compare['Item']['available_command'] ]
+
+            if set(l1) - set(l2):
+                print('%s differ' % item['driver_thing_attr_key'])
+                print(item)
+                print('', end='\n')
+
+        if item.get('driver_edge_thing_key', '').startswith(target):
+            compare = dst_table.get_item(Key={'driver_edge_thing_key': item['driver_edge_thing_key'].replace(_from, _to)})
+            print('#TODO')
+
+        if item.get('driver_id', '').startswith(target):
+            compare = dst_table.get_item(Key={'driver_id': item['driver_id'].replace(_from, _to)})
+            print('#TODO')
+            print(item)
+            print(compare)
+
+    print('finished')  # }}}
 
 
 main()
