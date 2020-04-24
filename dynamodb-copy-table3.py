@@ -1,84 +1,116 @@
 #!/usr/bin/python
+import argparse  # {{{ imoprt
 import boto3 as boto3
 import sys
-import os
+import os  # }}}
 
-if len(sys.argv) != 4:
-    print('Usage: %s <source_table_name>' \
-        ' <destination_table_name> <target_function_name>' % sys.argv[0])
-    sys.exit(1)
 
-region = os.getenv('AWS_DEFAULT_REGION', 'ap-northeast-1')
+parser = argparse.ArgumentParser(description='Copies dynamodb')  # {{{
 
-dynamodb = boto3.resource('dynamodb')
+parser.add_argument('--src', help='Table name of dynamodb to be cpied from', required=True)
+parser.add_argument('--dst', help='Table name of destination', required=True)
+parser.add_argument('-f', '--function_name', help='Name of lambda function to copy. Ex. devIoTExDriverAlexaFunctions')
+parser.add_argument('-d', '--dry-run', action='store_true')
+parser.add_argument('--dev_to_trial', action='store_true')
+parser.add_argument('--trial_to_prod', action='store_true')
+
+args = parser.parse_args()  # }}}
+
+
+dynamodb = boto3.resource('dynamodb')  # {{{
+
+''' currently unsupported
 mynamodb = boto3.resource('dynamodb',
-        aws_access_key_id='',
-        aws_secret_access_key='',
-        region_name=region
-)
+                           aws_access_key_id='',          # put your aws credentials here if you
+                           aws_secret_access_key='',      # want to migrate to another aws account
+                           region_name='ap-northeast-1')
+'''
+
+src_table = dynamodb.Table(args.src)
+dst_table = dynamodb.Table(args.dst)  # }}}
 
 
-src_table = sys.argv[1]
-try:
-    src_table = dynamodb.Table(src_table)
-    print('source table: %s' % src_table.table_arn)
-except:
-    print("src_table doesn't exist")
-    sys.exit(1)
+def main():  # {{{
+
+    if table_exists(src_table):  # {{{
+        print('source table: %s' % src_table.table_arn)
+    else:
+        print("source table doesn't exist")
+        sys.exit(1)  # }}}
+
+    if table_exists(dst_table):  # {{{
+        print('destination table: %s' % dst_table.table_arn)
+    else:
+        print("destination table doesn't exist")
+        create_destination_table(src_table, args.dst)  # }}}
+
+    if args.function_name:
+        copy_function_items()
+
+    print ('We are done. Exiting...')  # }}}
 
 
-dst_table = sys.argv[2]
-try:
-    _ = dynamodb.Table(dst_table)
-    if _.table_arn is not None:
-        print('dst_table already exists.')
-        print(_.table_arn)
-        sys.exit(1)
-except:
-    pass
+def table_exists(table):  # {{{
+    result = False
+    try:
+        result = table.table_status in ("CREATING", "UPDATING", "DELETING", "ACTIVE")
+    except:
+        result = False
+    return result  # }}}
 
 
-try:  # Create new table
-    print('Creating dst_table. Please wait...')
-    dst_table = dynamodb.create_table(
-            TableName=dst_table,
-            KeySchema=src_table.key_schema,
-            AttributeDefinitions=src_table.attribute_definitions,
-            ProvisionedThroughput={
-                'ReadCapacityUnits': src_table.provisioned_throughput['ReadCapacityUnits'],
-                'WriteCapacityUnits': src_table.provisioned_throughput['WriteCapacityUnits']
-                }
-        )
-    dst_table.wait_until_exists()
-    print('Created dst_table')
-except Exception as e:
-    print(e)
-    sys.exit(1)
-
-target_function = sys.argv[3]
-
-
-print('target_function: %s' % target_function)
-
-# dst_table = dynamodb.Table(dst_table)
-
-target_function = 'aws.lambda.' + target_function
-with dst_table.batch_writer() as batch:
-    print('Copying items...')
-    for item in src_table.scan()['Items']:
-        if (('virtual_driver_command_key' in item and item['virtual_driver_command_key'].startswith(target_function)) \
-              or ('driver_edge_thing_key' in item and item['driver_edge_thing_key'].startswith(target_function)) \
-                          or ('driver_id' in item and item['driver_id'].startswith(target_function))):
-            for k, v in item.items():
-                if type(v) == str and 'dev' in v:
-                    item[k] = v.replace('dev', 'trail')
-
-            print(item, end='\n')
-            print('', end='\n')
-
-            batch.put_item(Item=item)
-
-    print('finished')
+def create_destination_table(src_table: dynamodb.Table, dst_table_name: str):  # {{{
+    try:
+        print('Creating %s. Please wait...' % dst_table_name)
+        dst_table = dynamodb.create_table(  # {{{
+                TableName=dst_table_name,
+                KeySchema=src_table.key_schema,
+                AttributeDefinitions=src_table.attribute_definitions,
+                ProvisionedThroughput={
+                    'ReadCapacityUnits': src_table.provisioned_throughput['ReadCapacityUnits'],
+                    'WriteCapacityUnits': src_table.provisioned_throughput['WriteCapacityUnits']
+                    }
+            )  # }}}
+        dst_table.wait_until_exists()
+        print('Created %s.' % dst_table_name)
+    except Exception as e:
+        print(e)
+        sys.exit(1)  # }}}
 
 
-print ('We are done. Exiting...')
+def copy_function_items():  # {{{
+
+    if args.dev_to_trial:  # {{{
+        _from = 'dev'
+        _to = 'trial'  # }}}
+    if args.trial_to_prod:  # {{{
+        _from = 'trial'
+        _to = 'prod'  # }}}
+
+    if args.function_name:  # {{{
+        target_function = 'aws.lambda.' + args.function_name
+    else:
+        target_function = 'None'  # }}}
+
+    with dst_table.batch_writer() as batch:  # {{{
+        print('Copying items...')
+        print('target_function: %s' % target_function)
+        for item in src_table.scan()['Items']:
+            if ((item.get('virtual_driver_command_key', '').startswith(target_function)) \
+                  or (item.get('driver_edge_thing_key', '').startswith(target_function)) \
+                              or (item.get('driver_id', '').startswith(target_function))):
+                for k, v in item.items():
+                    if type(v) == str and _from in v:
+                        item[k] = v.replace(_from ,_to)
+
+                print(item, end='\n')
+                print('', end='\n')
+
+                None if args.dry-run else batch.put_item(Item=item)
+
+        print('finished')  # }}}
+    # }}}
+
+
+main()
+
